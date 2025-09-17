@@ -1,0 +1,477 @@
+import pygame
+import os
+import json
+import random
+import time
+import math
+
+# Configurações iniciais
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
+SAVE_FILE = os.path.join(BASE_DIR, "save_game.json")
+
+# Inicialização do Pygame
+pygame.init()
+pygame.font.init()
+
+# Obter informações do monitor
+info = pygame.display.Info()
+LARGURA, ALTURA = info.current_w, info.current_h
+tela = pygame.display.set_mode((LARGURA, ALTURA), pygame.FULLSCREEN)
+pygame.display.set_caption("My Clicker")
+relogio = pygame.time.Clock()
+
+# Cores
+BRANCO = (255, 255, 255)
+PRETO = (0, 0, 0)
+CINZA = (200, 200, 200)
+CINZA_ESCURO = (100, 100, 100)
+VERMELHO = (255, 0, 0)
+VERDE = (0, 200, 0)
+AZUL = (0, 120, 255)
+
+# Variáveis do jogo
+pontos = 0
+cursores = 0
+spaceships = 0
+pcursores = 5
+pspaceships = 50
+loja_aberta = False
+spaceship_animations = []
+botao_upgradado = False
+mensagem_temporaria = ""
+mensagem_tempo = 0
+botao_clique_pressionado = False
+botao_clique_tempo = 0
+
+# Variáveis para controle de clique
+clique_liberado = True  # Controla se o clique do mouse foi liberado
+
+# Fontes
+fonte_titulo = pygame.font.SysFont("comicsansms", 60, bold=True)
+fonte_grande = pygame.font.SysFont("comicsansms", 30)
+fonte_media = pygame.font.SysFont("comicsansms", 24)
+fonte_pequena = pygame.font.SysFont("comicsansms", 20)
+
+# Funções de utilidade
+def carregar_imagem(nome_arquivo, tamanho=(30, 30)):
+    """Carrega uma imagem da pasta images com fallback para cor sólida"""
+    caminho = os.path.join(IMAGE_DIR, nome_arquivo)
+    try:
+        if os.path.exists(caminho):
+            img = pygame.image.load(caminho).convert_alpha()
+            return pygame.transform.scale(img, tamanho)
+        else:
+            # Criar uma imagem de fallback
+            surf = pygame.Surface(tamanho, pygame.SRCALPHA)
+            if "cursor" in nome_arquivo:
+                surf.fill((0, 0, 255, 255))  # Azul para cursor
+            elif "spaceship" in nome_arquivo:
+                surf.fill((0, 255, 0, 255))  # Verde para spaceship
+            else:
+                surf.fill((255, 0, 0, 255))  # Vermelho para outros
+            return surf
+    except Exception as e:
+        print(f"Erro ao carregar imagem {nome_arquivo}: {e}")
+        surf = pygame.Surface(tamanho, pygame.SRCALPHA)
+        surf.fill((255, 0, 0, 255))
+        return surf
+
+# Carregar todas as imagens
+cursor_icon = carregar_imagem("cursor.png", (60, 60))
+spaceship_icon = carregar_imagem("spaceship.png", (60, 60))
+click_icon = carregar_imagem("click_button.png", (300, 100))
+buy_icon = carregar_imagem("buy_button.png", (200, 30))
+buy_spaceship_icon = carregar_imagem("buy_spaceship_button.png", (200, 30))
+click_pressed_icon = carregar_imagem("click_button_pressed.png", (300, 100))
+buy_pressed_icon = carregar_imagem("buy_button_pressed.png", (200, 30))
+buy_spaceship_pressed_icon = carregar_imagem("buy_spaceship_button_pressed.png", (200, 30))
+loja_icon = carregar_imagem("loja_icon.png", (64, 64))
+save_icon = carregar_imagem("save_icon.png", (64, 64))
+load_icon = carregar_imagem("load_icon.png", (64, 64))
+click_upgraded_icon = carregar_imagem("click_button_upgraded.png", (300, 100))
+click_upgraded_pressed_icon = carregar_imagem("click_button_upgraded_pressed.png", (300, 100))
+
+# Se as imagens de botão pressionado não existirem, criar versões escuras
+if buy_pressed_icon.get_size() == (1, 1):  # Imagem de fallback
+    buy_pressed_icon = pygame.Surface((200, 30))
+    buy_pressed_icon.fill(CINZA_ESCURO)
+    
+if buy_spaceship_pressed_icon.get_size() == (1, 1):
+    buy_spaceship_pressed_icon = pygame.Surface((200, 30))
+    buy_spaceship_pressed_icon.fill(CINZA_ESCURO)
+
+if click_pressed_icon.get_size() == (1, 1):
+    click_pressed_icon = pygame.Surface((300, 100))
+    click_pressed_icon.fill(CINZA_ESCURO)
+
+if click_upgraded_icon.get_size() == (1, 1):
+    click_upgraded_icon = pygame.Surface((300, 100))
+    click_upgraded_icon.fill((150, 100, 200))  # Roxo para botão melhorado
+
+if click_upgraded_pressed_icon.get_size() == (1, 1):
+    click_upgraded_pressed_icon = pygame.Surface((300, 100))
+    click_upgraded_pressed_icon.fill((100, 50, 150))  # Roxo escuro
+
+# Funções do jogo
+def salvar_jogo():
+    """Salva o progresso do jogo em um arquivo JSON"""
+    global mensagem_temporaria, mensagem_tempo
+    
+    try:
+        dados = {
+            "pontos": pontos,
+            "cursores": cursores,
+            "spaceships": spaceships,
+            "pcursores": pcursores,
+            "pspaceships": pspaceships,
+            "botao_upgradado": botao_upgradado
+        }
+        
+        with open(SAVE_FILE, 'w') as f:
+            json.dump(dados, f)
+        
+        mensagem_temporaria = "Jogo salvo com sucesso!"
+        mensagem_tempo = pygame.time.get_ticks()
+        print("Jogo salvo com sucesso!")
+        
+    except Exception as e:
+        mensagem_temporaria = f"Erro ao salvar: {e}"
+        mensagem_tempo = pygame.time.get_ticks()
+        print(f"Erro ao salvar: {e}")
+
+def carregar_jogo():
+    """Carrega o progresso do jogo do arquivo de salvamento"""
+    global pontos, cursores, spaceships, pcursores, pspaceships, botao_upgradado
+    global mensagem_temporaria, mensagem_tempo
+    
+    try:
+        if not os.path.exists(SAVE_FILE):
+            mensagem_temporaria = "Nenhum arquivo de salvamento encontrado!"
+            mensagem_tempo = pygame.time.get_ticks()
+            return
+        
+        with open(SAVE_FILE, 'r') as f:
+            dados = json.load(f)
+        
+        pontos = dados["pontos"]
+        cursores = dados["cursores"]
+        spaceships = dados["spaceships"]
+        pcursores = dados["pcursores"]
+        pspaceships = dados["pspaceships"]
+        botao_upgradado = dados.get("botao_upgradado", False)
+        
+        # Reiniciar animações
+        spaceship_animations.clear()
+        for _ in range(spaceships):
+            adicionar_spaceship_animacao()
+        
+        mensagem_temporaria = "Jogo carregado com sucesso!"
+        mensagem_tempo = pygame.time.get_ticks()
+        print("Jogo carregado com sucesso!")
+        
+    except Exception as e:
+        mensagem_temporaria = f"Erro ao carregar: {e}"
+        mensagem_tempo = pygame.time.get_ticks()
+        print(f"Erro ao carregar: {e}")
+
+def comprar_upgrade_secreto():
+    """Função para comprar o upgrade secreto do botão de clique"""
+    global pontos, botao_upgradado, mensagem_temporaria, mensagem_tempo
+    
+    if pontos >= 45:
+        pontos -= 45
+        botao_upgradado = True
+        mensagem_temporaria = "Upgrade secreto ativado! +3 pontos por clique!"
+        mensagem_tempo = pygame.time.get_ticks()
+    else:
+        mensagem_temporaria = "Pontos insuficientes para o upgrade!"
+        mensagem_tempo = pygame.time.get_ticks()
+
+def atualizar_itens_visuais():
+    """Atualiza la exibição visual dos cursores"""
+    # Em Pygame, desenhamos os cursores diretamente na tela durante o loop principal
+    pass
+
+def adicionar_spaceship_animacao():
+    """Adiciona uma nova spaceship para animação"""
+    x = random.randint(100, LARGURA - 100)
+    y = random.randint(ALTURA // 2, ALTURA - 100)
+    speed = random.uniform(1.5, 3.0)
+    spaceship_animations.append({"x": x, "y": y, "speed": speed})
+
+def clicker():
+    """Função que aumenta pontos automaticamente baseado nos cursores e spaceships"""
+    global pontos
+    pontos += 5 * cursores
+    pontos += 20 * spaceships
+
+def clique():
+    """Aumenta pontos ao clicar manualmente ou pressionar espaço"""
+    global pontos, botao_clique_pressionado, botao_clique_tempo
+    
+    if botao_upgradado:
+        pontos += 3  # 3 pontos por clique com o botão melhorado
+    else:
+        pontos += 1  # 1 ponto por clique normal
+        
+    botao_clique_pressionado = True
+    botao_clique_tempo = pygame.time.get_ticks()
+
+def buy_cursor():
+    """Compra um cursor se tiver pontos suficientes"""
+    global cursores, pontos, pcursores, mensagem_temporaria, mensagem_tempo
+    
+    if pontos >= pcursores:
+        pontos -= pcursores
+        cursores += 1
+        pcursores = int(pcursores + pcursores * 0.2)
+        mensagem_temporaria = "Cursor comprado!"
+        mensagem_tempo = pygame.time.get_ticks()
+    else:
+        mensagem_temporaria = "Pontos insuficientes!"
+        mensagem_tempo = pygame.time.get_ticks()
+
+def buy_spaceship():
+    """Compra uma spaceship se tiver pontos suficientes"""
+    global spaceships, pontos, pspaceships, mensagem_temporaria, mensagem_tempo
+    
+    if pontos >= pspaceships:
+        pontos -= pspaceships
+        spaceships += 1
+        pspaceships = int(pspaceships + pspaceships * 0.3)
+        adicionar_spaceship_animacao()
+        mensagem_temporaria = "Spaceship comprada!"
+        mensagem_tempo = pygame.time.get_ticks()
+    else:
+        mensagem_temporaria = "Pontos insuficientes!"
+        mensagem_tempo = pygame.time.get_ticks()
+
+def toggle_loja():
+    """Abre ou fecha a loja"""
+    global loja_aberta
+    loja_aberta = not loja_aberta
+
+def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto, image=None, pressed=False):
+    """Desenha um botão na tela"""
+    mouse_pos = pygame.mouse.get_pos()
+    mouse_pressed = pygame.mouse.get_pressed()[0]
+    
+    # Verificar se o mouse está sobre o botão
+    hover = rect.collidepoint(mouse_pos)
+    
+    # Determinar a cor do botão
+    if pressed:
+        cor = cor_hover
+    elif hover and mouse_pressed:
+        cor = cor_hover
+    elif hover:
+        cor = cor_hover
+    else:
+        cor = cor_normal
+    
+    # Desenhar o botão
+    if image:
+        if pressed and image != click_icon and image != click_upgraded_icon:
+            # Escurecer a imagem para efeito de pressionado
+            dark_image = image.copy()
+            dark_image.fill((50, 50, 50, 0), special_flags=pygame.BLEND_RGBA_SUB)
+            surface.blit(dark_image, rect)
+        else:
+            surface.blit(image, rect)
+    else:
+        pygame.draw.rect(surface, cor, rect, border_radius=10)
+        pygame.draw.rect(surface, CINZA_ESCURO, rect, 2, border_radius=10)
+    
+    # Desenhar o texto se não for um botão com imagem
+    if not image and texto:
+        texto_surf = fonte.render(texto, True, cor_texto)
+        texto_rect = texto_surf.get_rect(center=rect.center)
+        surface.blit(texto_surf, texto_rect)
+    
+    return hover
+
+def desenhar_loja():
+    """Desenha a interface da loja"""
+    # Fundo da loja
+    loja_rect = pygame.Rect(LARGURA // 4, 100, LARGURA // 2, ALTURA - 200)
+    pygame.draw.rect(tela, BRANCO, loja_rect, border_radius=15)
+    pygame.draw.rect(tela, CINZA_ESCURO, loja_rect, 3, border_radius=15)
+    
+    # Título da loja
+    titulo_texto = fonte_titulo.render("Loja", True, PRETO)
+    titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 150))
+    tela.blit(titulo_texto, titulo_rect)
+    
+    # Item Cursor
+    cursor_rect = pygame.Rect(LARGURA // 4 + 50, 220, LARGURA // 2 - 100, 60)
+    pygame.draw.rect(tela, CINZA, cursor_rect, border_radius=10)
+    
+    texto_cursor = fonte_media.render("Cursor", True, PRETO)
+    tela.blit(texto_cursor, (cursor_rect.x + 20, cursor_rect.y + 20))
+    
+    texto_preco = fonte_media.render(f"Preço: {pcursores}pts", True, PRETO)
+    tela.blit(texto_preco, (cursor_rect.x + 200, cursor_rect.y + 20))
+    
+    botao_cursor_rect = pygame.Rect(cursor_rect.right - 220, cursor_rect.y + 15, 200, 30)
+    if desenhar_botao(tela, botao_cursor_rect, "Comprar", fonte_pequena, VERDE, (0, 150, 0), BRANCO, buy_icon):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            buy_cursor()
+    
+    # Item Spaceship
+    spaceship_rect = pygame.Rect(LARGURA // 4 + 50, 300, LARGURA // 2 - 100, 60)
+    pygame.draw.rect(tela, CINZA, spaceship_rect, border_radius=10)
+    
+    texto_spaceship = fonte_media.render("Spaceship", True, PRETO)
+    tela.blit(texto_spaceship, (spaceship_rect.x + 20, spaceship_rect.y + 20))
+    
+    texto_preco_sp = fonte_media.render(f"Preço: {pspaceships}pts", True, PRETO)
+    tela.blit(texto_preco_sp, (spaceship_rect.x + 200, spaceship_rect.y + 20))
+    
+    botao_spaceship_rect = pygame.Rect(spaceship_rect.right - 220, spaceship_rect.y + 15, 200, 30)
+    if desenhar_botao(tela, botao_spaceship_rect, "Comprar", fonte_pequena, AZUL, (0, 100, 200), BRANCO, buy_spaceship_icon):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            buy_spaceship()
+    
+    # Botão Fechar Loja
+    fechar_rect = pygame.Rect(LARGURA // 2 - 100, ALTURA - 150, 200, 50)
+    if desenhar_botao(tela, fechar_rect, "Fechar Loja", fonte_media, VERMELHO, (200, 0, 0), BRANCO):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            toggle_loja()
+
+# Inicializar animações de spaceships
+for _ in range(spaceships):
+    adicionar_spaceship_animacao()
+
+# Loop principal
+executando = True
+ultimo_tempo_clique = 0
+tempo_inicial = pygame.time.get_ticks()
+
+while executando:
+    tempo_atual = pygame.time.get_ticks()
+    tempo_decorrido = (tempo_atual - tempo_inicial) / 1000.0  # Converter para segundos
+    
+    # Processar eventos
+    for evento in pygame.event.get():
+        if evento.type == pygame.QUIT:
+            executando = False
+        elif evento.type == pygame.KEYDOWN:
+            if evento.key == pygame.K_ESCAPE:
+                executando = False
+            elif evento.key == pygame.K_SPACE:
+                clique()
+        elif evento.type == pygame.MOUSEBUTTONDOWN:
+            if evento.button == 1:  # Botão esquerdo do mouse
+                clique_liberado = False
+                x, y = evento.pos
+                
+                # Verificar clique no título para easter egg
+                titulo_texto = fonte_titulo.render("My Clicker", True, PRETO)
+                titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 80))
+                
+                # Verificar se clique foi próximo ao ponto do "i"
+                ponto_i_x = titulo_rect.right - 30
+                if abs(x - ponto_i_x) < 20 and abs(y - titulo_rect.centery) < 20:
+                    if pontos == 69 and not botao_upgradado:
+                        comprar_upgrade_secreto()
+        elif evento.type == pygame.MOUSEBUTTONUP:
+            if evento.button == 1:  # Botão esquerdo do mouse liberado
+                clique_liberado = True
+    
+    # Atualizar lógica do jogo
+    if tempo_decorrido - ultimo_tempo_clique >= 2.5:  # 2.5 segundos
+        clicker()
+        ultimo_tempo_clique = tempo_decorrido
+    
+    # Atualizar animações
+    for anim in spaceship_animations:
+        anim["y"] -= anim["speed"]
+        if anim["y"] < -60:
+            anim["y"] = ALTURA + 60
+            anim["x"] = random.randint(60, LARGURA - 60)
+    
+    # Verificar se o botão de clique deve voltar ao normal
+    if botao_clique_pressionado and tempo_atual - botao_clique_tempo > 500:
+        botao_clique_pressionado = False
+    
+    # Renderizar
+    tela.fill(BRANCO)
+    
+    # Desenhar título
+    titulo_texto = fonte_titulo.render("My Clicker", True, PRETO)
+    titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 80))
+    tela.blit(titulo_texto, titulo_rect)
+    
+    # Desenhar estatísticas
+    texto_pontos = fonte_grande.render(f"Pontos: {pontos:.1f}", True, PRETO)
+    tela.blit(texto_pontos, (50, 50))
+    
+    texto_cursores = fonte_grande.render(f"Cursores: {cursores}", True, PRETO)
+    tela.blit(texto_cursores, (LARGURA - texto_cursores.get_width() - 50, 50))
+    
+    # Desenhar cursores
+    for i in range(cursores):
+        x = random.randint(40, LARGURA - 40)
+        y = random.randint(150, ALTURA - 200)
+        tela.blit(cursor_icon, (x, y))
+    
+    # Desenhar spaceships animadas
+    for anim in spaceship_animations:
+        tela.blit(spaceship_icon, (anim["x"], anim["y"]))
+    
+    # Desenhar botões de controle
+    botao_salvar_rect = pygame.Rect(50, ALTURA - 100, 64, 64)
+    if desenhar_botao(tela, botao_salvar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, save_icon):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            salvar_jogo()
+    
+    botao_carregar_rect = pygame.Rect(130, ALTURA - 100, 64, 64)
+    if desenhar_botao(tela, botao_carregar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, load_icon):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            carregar_jogo()
+    
+    botao_loja_rect = pygame.Rect(LARGURA - 130, ALTURA - 100, 64, 64)
+    if desenhar_botao(tela, botao_loja_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, loja_icon):
+        if pygame.mouse.get_pressed()[0] and clique_liberado:
+            toggle_loja()
+    
+    # Desenhar botão de clique principal
+    botao_clique_rect = pygame.Rect(LARGURA // 2 - 150, ALTURA - 150, 300, 100)
+    
+    if botao_upgradado:
+        if botao_clique_pressionado:
+            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_pressed_icon, True):
+                if pygame.mouse.get_pressed()[0] and clique_liberado:
+                    clique()
+        else:
+            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_icon):
+                if pygame.mouse.get_pressed()[0] and clique_liberado:
+                    clique()
+    else:
+        if botao_clique_pressionado:
+            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_pressed_icon, True):
+                if pygame.mouse.get_pressed()[0] and clique_liberado:
+                    clique()
+        else:
+            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_icon):
+                if pygame.mouse.get_pressed()[0] and clique_liberado:
+                    clique()
+    
+    # Desenhar loja se estiver aberta
+    if loja_aberta:
+        desenhar_loja()
+    
+    # Desenhar mensagem temporária
+    if mensagem_temporaria and tempo_atual - mensagem_tempo < 2000:
+        texto_msg = fonte_media.render(mensagem_temporaria, True, PRETO)
+        msg_rect = texto_msg.get_rect(center=(LARGURA // 2, 120))
+        tela.blit(texto_msg, msg_rect)
+    elif mensagem_temporaria:
+        mensagem_temporaria = ""
+    
+    # Atualizar a tela
+    pygame.display.flip()
+    relogio.tick(60)
+
+pygame.quit()
