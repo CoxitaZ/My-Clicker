@@ -43,9 +43,13 @@ mensagem_temporaria = ""
 mensagem_tempo = 0
 botao_clique_pressionado = False
 botao_clique_tempo = 0
+ultimo_aumento_precos = 0
+intervalo_aumento = 240000
+proximo_aumento_tempo = 0
 
 # Variáveis para controle de clique
 clique_liberado = True  # Controla se o clique do mouse foi liberado
+mouse_pressionado = False
 
 # Fontes
 fonte_titulo = pygame.font.SysFont("comicsansms", 60, bold=True)
@@ -125,7 +129,9 @@ def salvar_jogo():
             "spaceships": spaceships,
             "pcursores": pcursores,
             "pspaceships": pspaceships,
-            "botao_upgradado": botao_upgradado
+            "botao_upgradado": botao_upgradado,
+            # ↓ NOVO DADO ↓
+            "ultimo_aumento_precos": ultimo_aumento_precos
         }
         
         with open(SAVE_FILE, 'w') as f:
@@ -143,7 +149,7 @@ def salvar_jogo():
 def carregar_jogo():
     """Carrega o progresso do jogo do arquivo de salvamento"""
     global pontos, cursores, spaceships, pcursores, pspaceships, botao_upgradado
-    global mensagem_temporaria, mensagem_tempo
+    global mensagem_temporaria, mensagem_tempo, ultimo_aumento_precos, proximo_aumento_tempo
     
     try:
         if not os.path.exists(SAVE_FILE):
@@ -160,6 +166,8 @@ def carregar_jogo():
         pcursores = dados["pcursores"]
         pspaceships = dados["pspaceships"]
         botao_upgradado = dados.get("botao_upgradado", False)
+        ultimo_aumento_precos = dados.get("ultimo_aumento_precos", 0)
+        proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
         
         # Reiniciar animações
         spaceship_animations.clear()
@@ -225,7 +233,7 @@ def buy_cursor():
     if pontos >= pcursores:
         pontos -= pcursores
         cursores += 1
-        pcursores = int(pcursores + pcursores * 0.2)
+        pcursores = int(pcursores + pcursores * 0.15)  # Alterado de 0.2 para 0.15 (15%)
         mensagem_temporaria = "Cursor comprado!"
         mensagem_tempo = pygame.time.get_ticks()
     else:
@@ -239,7 +247,7 @@ def buy_spaceship():
     if pontos >= pspaceships:
         pontos -= pspaceships
         spaceships += 1
-        pspaceships = int(pspaceships + pspaceships * 0.3)
+        pspaceships = int(pspaceships + pspaceships * 0.25)  # Alterado de 0.3 para 0.25 (25%)
         adicionar_spaceship_animacao()
         mensagem_temporaria = "Spaceship comprada!"
         mensagem_tempo = pygame.time.get_ticks()
@@ -252,10 +260,33 @@ def toggle_loja():
     global loja_aberta
     loja_aberta = not loja_aberta
 
+def aumentar_precos_aleatorio():
+    """Aumenta os preços de todos os itens entre 5% e 40%"""
+    global pcursores, pspaceships, mensagem_temporaria, mensagem_tempo, ultimo_aumento_precos, proximo_aumento_tempo
+    
+    # Gerar aumento aleatório entre 5% e 40%
+    aumento_percentual = random.uniform(1.05, 1.40)
+    
+    # Aplicar aumento aos preços
+    pcursores = int(pcursores * aumento_percentual)
+    pspaceships = int(pspaceships * aumento_percentual)
+    
+    # Atualizar tempos
+    ultimo_aumento_precos = pygame.time.get_ticks()
+    proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
+    
+    # Mensagem informativa
+    percentual = int((aumento_percentual - 1) * 100)
+    mensagem_temporaria = f"Inflação! Preços aumentaram {percentual}%!"
+    mensagem_tempo = pygame.time.get_ticks()
+    
+    print(f"Preços aumentados em {percentual}%")
+    print(f"Novo preço cursor: {pcursores}")
+    print(f"Novo preço spaceship: {pspaceships}")
+
 def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto, image=None, pressed=False):
     """Desenha um botão na tela"""
     mouse_pos = pygame.mouse.get_pos()
-    mouse_pressed = pygame.mouse.get_pressed()[0]
     
     # Verificar se o mouse está sobre o botão
     hover = rect.collidepoint(mouse_pos)
@@ -263,7 +294,7 @@ def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto
     # Determinar a cor do botão
     if pressed:
         cor = cor_hover
-    elif hover and mouse_pressed:
+    elif hover and mouse_pressionado:
         cor = cor_hover
     elif hover:
         cor = cor_hover
@@ -303,6 +334,16 @@ def desenhar_loja():
     titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 150))
     tela.blit(titulo_texto, titulo_rect)
     
+    # Timer de próximo aumento
+    tempo_atual = pygame.time.get_ticks()
+    tempo_restante = max(0, proximo_aumento_tempo - tempo_atual)
+    minutos_restantes = tempo_restante // 60000
+    segundos_restantes = (tempo_restante % 60000) // 1000
+    
+    timer_texto = fonte_pequena.render(f"Próximo aumento: {minutos_restantes:02d}:{segundos_restantes:02d}", True, VERMELHO)
+    timer_rect = timer_texto.get_rect(center=(LARGURA // 2, 190))
+    tela.blit(timer_texto, timer_rect)
+    
     # Item Cursor
     cursor_rect = pygame.Rect(LARGURA // 4 + 50, 220, LARGURA // 2 - 100, 60)
     pygame.draw.rect(tela, CINZA, cursor_rect, border_radius=10)
@@ -314,9 +355,7 @@ def desenhar_loja():
     tela.blit(texto_preco, (cursor_rect.x + 200, cursor_rect.y + 20))
     
     botao_cursor_rect = pygame.Rect(cursor_rect.right - 220, cursor_rect.y + 15, 200, 30)
-    if desenhar_botao(tela, botao_cursor_rect, "Comprar", fonte_pequena, VERDE, (0, 150, 0), BRANCO, buy_icon):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            buy_cursor()
+    hover_cursor = desenhar_botao(tela, botao_cursor_rect, "Comprar", fonte_pequena, VERDE, (0, 150, 0), BRANCO, buy_icon)
     
     # Item Spaceship
     spaceship_rect = pygame.Rect(LARGURA // 4 + 50, 300, LARGURA // 2 - 100, 60)
@@ -329,28 +368,47 @@ def desenhar_loja():
     tela.blit(texto_preco_sp, (spaceship_rect.x + 200, spaceship_rect.y + 20))
     
     botao_spaceship_rect = pygame.Rect(spaceship_rect.right - 220, spaceship_rect.y + 15, 200, 30)
-    if desenhar_botao(tela, botao_spaceship_rect, "Comprar", fonte_pequena, AZUL, (0, 100, 200), BRANCO, buy_spaceship_icon):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            buy_spaceship()
+    hover_spaceship = desenhar_botao(tela, botao_spaceship_rect, "Comprar", fonte_pequena, AZUL, (0, 100, 200), BRANCO, buy_spaceship_icon)
     
     # Botão Fechar Loja
     fechar_rect = pygame.Rect(LARGURA // 2 - 100, ALTURA - 150, 200, 50)
-    if desenhar_botao(tela, fechar_rect, "Fechar Loja", fonte_media, VERMELHO, (200, 0, 0), BRANCO):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            toggle_loja()
+    hover_fechar = desenhar_botao(tela, fechar_rect, "Fechar Loja", fonte_media, VERMELHO, (200, 0, 0), BRANCO)
+    
+    # Retornar informações sobre quais botões estão com hover
+    return {
+        'cursor': hover_cursor,
+        'spaceship': hover_spaceship,
+        'fechar': hover_fechar
+    }
 
 # Inicializar animações de spaceships
 for _ in range(spaceships):
     adicionar_spaceship_animacao()
+
+# Inicializar timer de aumento de preços (adicionar estas linhas)
+if ultimo_aumento_precos == 0:
+    ultimo_aumento_precos = pygame.time.get_ticks()
+    proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
 
 # Loop principal
 executando = True
 ultimo_tempo_clique = 0
 tempo_inicial = pygame.time.get_ticks()
 
+# Variáveis para controle de interface
+botoes_loja_hover = {'cursor': False, 'spaceship': False, 'fechar': False}
+botao_salvar_hover = False
+botao_carregar_hover = False
+botao_loja_hover = False
+botao_clique_hover = False
+
 while executando:
     tempo_atual = pygame.time.get_ticks()
     tempo_decorrido = (tempo_atual - tempo_inicial) / 1000.0  # Converter para segundos
+    
+    # VERIFICAÇÃO DO AUMENTO DE PREÇOS
+    if tempo_atual >= proximo_aumento_tempo:
+        aumentar_precos_aleatorio()
     
     # Processar eventos
     for evento in pygame.event.get():
@@ -361,10 +419,18 @@ while executando:
                 executando = False
             elif evento.key == pygame.K_SPACE:
                 clique()
+            elif evento.key == pygame.K_l:  # Tecla L para abrir/fechar loja
+                toggle_loja()
         elif evento.type == pygame.MOUSEBUTTONDOWN:
             if evento.button == 1:  # Botão esquerdo do mouse
+                mouse_pressionado = True
                 clique_liberado = False
                 x, y = evento.pos
+                
+                # Verificar clique no botão de clique principal
+                botao_clique_rect = pygame.Rect(LARGURA // 2 - 150, ALTURA - 150, 300, 100)
+                if botao_clique_rect.collidepoint(x, y):
+                    clique()
                 
                 # Verificar clique no título para easter egg
                 titulo_texto = fonte_titulo.render("My Clicker", True, PRETO)
@@ -375,8 +441,32 @@ while executando:
                 if abs(x - ponto_i_x) < 20 and abs(y - titulo_rect.centery) < 20:
                     if pontos == 69 and not botao_upgradado:
                         comprar_upgrade_secreto()
+                
+                # Verificar clique nos botões de controle
+                botao_salvar_rect = pygame.Rect(50, ALTURA - 100, 64, 64)
+                if botao_salvar_rect.collidepoint(x, y):
+                    salvar_jogo()
+                
+                botao_carregar_rect = pygame.Rect(130, ALTURA - 100, 64, 64)
+                if botao_carregar_rect.collidepoint(x, y):
+                    carregar_jogo()
+                
+                botao_loja_rect = pygame.Rect(LARGURA - 130, ALTURA - 100, 64, 64)
+                if botao_loja_rect.collidepoint(x, y):
+                    toggle_loja()
+                
+                # Verificar cliques na loja se estiver aberta
+                if loja_aberta:
+                    if botoes_loja_hover['cursor']:
+                        buy_cursor()
+                    elif botoes_loja_hover['spaceship']:
+                        buy_spaceship()
+                    elif botoes_loja_hover['fechar']:
+                        toggle_loja()
+                        
         elif evento.type == pygame.MOUSEBUTTONUP:
             if evento.button == 1:  # Botão esquerdo do mouse liberado
+                mouse_pressionado = False
                 clique_liberado = True
     
     # Atualizar lógica do jogo
@@ -422,45 +512,31 @@ while executando:
     
     # Desenhar botões de controle
     botao_salvar_rect = pygame.Rect(50, ALTURA - 100, 64, 64)
-    if desenhar_botao(tela, botao_salvar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, save_icon):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            salvar_jogo()
+    botao_salvar_hover = desenhar_botao(tela, botao_salvar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, save_icon)
     
     botao_carregar_rect = pygame.Rect(130, ALTURA - 100, 64, 64)
-    if desenhar_botao(tela, botao_carregar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, load_icon):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            carregar_jogo()
+    botao_carregar_hover = desenhar_botao(tela, botao_carregar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, load_icon)
     
     botao_loja_rect = pygame.Rect(LARGURA - 130, ALTURA - 100, 64, 64)
-    if desenhar_botao(tela, botao_loja_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, loja_icon):
-        if pygame.mouse.get_pressed()[0] and clique_liberado:
-            toggle_loja()
+    botao_loja_hover = desenhar_botao(tela, botao_loja_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, loja_icon)
     
     # Desenhar botão de clique principal
     botao_clique_rect = pygame.Rect(LARGURA // 2 - 150, ALTURA - 150, 300, 100)
     
     if botao_upgradado:
         if botao_clique_pressionado:
-            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_pressed_icon, True):
-                if pygame.mouse.get_pressed()[0] and clique_liberado:
-                    clique()
+            botao_clique_hover = desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_pressed_icon, True)
         else:
-            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_icon):
-                if pygame.mouse.get_pressed()[0] and clique_liberado:
-                    clique()
+            botao_clique_hover = desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_upgraded_icon)
     else:
         if botao_clique_pressionado:
-            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_pressed_icon, True):
-                if pygame.mouse.get_pressed()[0] and clique_liberado:
-                    clique()
+            botao_clique_hover = desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_pressed_icon, True)
         else:
-            if desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_icon):
-                if pygame.mouse.get_pressed()[0] and clique_liberado:
-                    clique()
+            botao_clique_hover = desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_icon)
     
     # Desenhar loja se estiver aberta
     if loja_aberta:
-        desenhar_loja()
+        botoes_loja_hover = desenhar_loja()
     
     # Desenhar mensagem temporária
     if mensagem_temporaria and tempo_atual - mensagem_tempo < 2000:
