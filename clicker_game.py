@@ -29,6 +29,8 @@ CINZA_ESCURO = (100, 100, 100)
 VERMELHO = (255, 0, 0)
 VERDE = (0, 200, 0)
 AZUL = (0, 120, 255)
+LARANJA = (255, 165, 0)
+ROXO = (128, 0, 128)
 
 # Variáveis do jogo
 pontos = 0
@@ -43,19 +45,28 @@ mensagem_temporaria = ""
 mensagem_tempo = 0
 botao_clique_pressionado = False
 botao_clique_tempo = 0
-ultimo_aumento_precos = 0
-intervalo_aumento = 240000
-proximo_aumento_tempo = 0
 
 # Variáveis para controle de clique
-clique_liberado = True  # Controla se o clique do mouse foi liberado
+clique_liberado = True
 mouse_pressionado = False
+
+# Sistema de inflação/deflação complexo
+intervalo_inflacao = 180000  # 3 minutos em milissegundos
+ultimo_periodo_inflacao = 0
+proximo_periodo_inflacao = 0
+compras_periodo_cursor = 0
+compras_periodo_spaceship = 0
+compras_anteriores_cursor = 0
+compras_anteriores_spaceship = 0
+mensagens_inflacao = {"cursor": "", "spaceship": ""}
+tempo_mensagens_inflacao = {"cursor": 0, "spaceship": 0}
 
 # Fontes
 fonte_titulo = pygame.font.SysFont("comicsansms", 60, bold=True)
 fonte_grande = pygame.font.SysFont("comicsansms", 30)
 fonte_media = pygame.font.SysFont("comicsansms", 24)
 fonte_pequena = pygame.font.SysFont("comicsansms", 20)
+fonte_muito_pequena = pygame.font.SysFont("comicsansms", 16)
 
 # Funções de utilidade
 def carregar_imagem(nome_arquivo, tamanho=(30, 30)):
@@ -66,14 +77,13 @@ def carregar_imagem(nome_arquivo, tamanho=(30, 30)):
             img = pygame.image.load(caminho).convert_alpha()
             return pygame.transform.scale(img, tamanho)
         else:
-            # Criar uma imagem de fallback
             surf = pygame.Surface(tamanho, pygame.SRCALPHA)
             if "cursor" in nome_arquivo:
-                surf.fill((0, 0, 255, 255))  # Azul para cursor
+                surf.fill((0, 0, 255, 255))
             elif "spaceship" in nome_arquivo:
-                surf.fill((0, 255, 0, 255))  # Verde para spaceship
+                surf.fill((0, 255, 0, 255))
             else:
-                surf.fill((255, 0, 0, 255))  # Vermelho para outros
+                surf.fill((255, 0, 0, 255))
             return surf
     except Exception as e:
         print(f"Erro ao carregar imagem {nome_arquivo}: {e}")
@@ -96,8 +106,8 @@ load_icon = carregar_imagem("load_icon.png", (64, 64))
 click_upgraded_icon = carregar_imagem("click_button_upgraded.png", (300, 100))
 click_upgraded_pressed_icon = carregar_imagem("click_button_upgraded_pressed.png", (300, 100))
 
-# Se as imagens de botão pressionado não existirem, criar versões escuras
-if buy_pressed_icon.get_size() == (1, 1):  # Imagem de fallback
+# Fallback para imagens
+if buy_pressed_icon.get_size() == (1, 1):
     buy_pressed_icon = pygame.Surface((200, 30))
     buy_pressed_icon.fill(CINZA_ESCURO)
     
@@ -111,15 +121,15 @@ if click_pressed_icon.get_size() == (1, 1):
 
 if click_upgraded_icon.get_size() == (1, 1):
     click_upgraded_icon = pygame.Surface((300, 100))
-    click_upgraded_icon.fill((150, 100, 200))  # Roxo para botão melhorado
+    click_upgraded_icon.fill((150, 100, 200))
 
 if click_upgraded_pressed_icon.get_size() == (1, 1):
     click_upgraded_pressed_icon = pygame.Surface((300, 100))
-    click_upgraded_pressed_icon.fill((100, 50, 150))  # Roxo escuro
+    click_upgraded_pressed_icon.fill((100, 50, 150))
 
 # Funções do jogo
 def salvar_jogo():
-    """Salva o progresso do jogo em um arquivo JSON"""
+    """Salva o progresso do jogo em um arquito JSON"""
     global mensagem_temporaria, mensagem_tempo
     
     try:
@@ -130,8 +140,11 @@ def salvar_jogo():
             "pcursores": pcursores,
             "pspaceships": pspaceships,
             "botao_upgradado": botao_upgradado,
-            # ↓ NOVO DADO ↓
-            "ultimo_aumento_precos": ultimo_aumento_precos
+            "ultimo_periodo_inflacao": ultimo_periodo_inflacao,
+            "compras_periodo_cursor": compras_periodo_cursor,
+            "compras_periodo_spaceship": compras_periodo_spaceship,
+            "compras_anteriores_cursor": compras_anteriores_cursor,
+            "compras_anteriores_spaceship": compras_anteriores_spaceship
         }
         
         with open(SAVE_FILE, 'w') as f:
@@ -139,17 +152,17 @@ def salvar_jogo():
         
         mensagem_temporaria = "Jogo salvo com sucesso!"
         mensagem_tempo = pygame.time.get_ticks()
-        print("Jogo salvo com sucesso!")
         
     except Exception as e:
         mensagem_temporaria = f"Erro ao salvar: {e}"
         mensagem_tempo = pygame.time.get_ticks()
-        print(f"Erro ao salvar: {e}")
 
 def carregar_jogo():
     """Carrega o progresso do jogo do arquivo de salvamento"""
     global pontos, cursores, spaceships, pcursores, pspaceships, botao_upgradado
-    global mensagem_temporaria, mensagem_tempo, ultimo_aumento_precos, proximo_aumento_tempo
+    global mensagem_temporaria, mensagem_tempo, ultimo_periodo_inflacao
+    global compras_periodo_cursor, compras_periodo_spaceship, proximo_periodo_inflacao
+    global compras_anteriores_cursor, compras_anteriores_spaceship
     
     try:
         if not os.path.exists(SAVE_FILE):
@@ -166,22 +179,24 @@ def carregar_jogo():
         pcursores = dados["pcursores"]
         pspaceships = dados["pspaceships"]
         botao_upgradado = dados.get("botao_upgradado", False)
-        ultimo_aumento_precos = dados.get("ultimo_aumento_precos", 0)
-        proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
+        ultimo_periodo_inflacao = dados.get("ultimo_periodo_inflacao", 0)
+        compras_periodo_cursor = dados.get("compras_periodo_cursor", 0)
+        compras_periodo_spaceship = dados.get("compras_periodo_spaceship", 0)
+        compras_anteriores_cursor = dados.get("compras_anteriores_cursor", 0)
+        compras_anteriores_spaceship = dados.get("compras_anteriores_spaceship", 0)
         
-        # Reiniciar animações
+        proximo_periodo_inflacao = ultimo_periodo_inflacao + intervalo_inflacao
+        
         spaceship_animations.clear()
         for _ in range(spaceships):
             adicionar_spaceship_animacao()
         
         mensagem_temporaria = "Jogo carregado com sucesso!"
         mensagem_tempo = pygame.time.get_ticks()
-        print("Jogo carregado com sucesso!")
         
     except Exception as e:
         mensagem_temporaria = f"Erro ao carregar: {e}"
         mensagem_tempo = pygame.time.get_ticks()
-        print(f"Erro ao carregar: {e}")
 
 def comprar_upgrade_secreto():
     """Função para comprar o upgrade secreto do botão de clique"""
@@ -195,11 +210,6 @@ def comprar_upgrade_secreto():
     else:
         mensagem_temporaria = "Pontos insuficientes para o upgrade!"
         mensagem_tempo = pygame.time.get_ticks()
-
-def atualizar_itens_visuais():
-    """Atualiza la exibição visual dos cursores"""
-    # Em Pygame, desenhamos os cursores diretamente na tela durante o loop principal
-    pass
 
 def adicionar_spaceship_animacao():
     """Adiciona uma nova spaceship para animação"""
@@ -219,9 +229,9 @@ def clique():
     global pontos, botao_clique_pressionado, botao_clique_tempo
     
     if botao_upgradado:
-        pontos += 3  # 3 pontos por clique com o botão melhorado
+        pontos += 3
     else:
-        pontos += 1  # 1 ponto por clique normal
+        pontos += 1
         
     botao_clique_pressionado = True
     botao_clique_tempo = pygame.time.get_ticks()
@@ -229,11 +239,13 @@ def clique():
 def buy_cursor():
     """Compra um cursor se tiver pontos suficientes"""
     global cursores, pontos, pcursores, mensagem_temporaria, mensagem_tempo
+    global compras_periodo_cursor
     
     if pontos >= pcursores:
         pontos -= pcursores
         cursores += 1
-        pcursores = int(pcursores + pcursores * 0.15)  # Alterado de 0.2 para 0.15 (15%)
+        compras_periodo_cursor += 1
+        pcursores = int(pcursores + pcursores * 0.15)
         mensagem_temporaria = "Cursor comprado!"
         mensagem_tempo = pygame.time.get_ticks()
     else:
@@ -243,11 +255,13 @@ def buy_cursor():
 def buy_spaceship():
     """Compra uma spaceship se tiver pontos suficientes"""
     global spaceships, pontos, pspaceships, mensagem_temporaria, mensagem_tempo
+    global compras_periodo_spaceship
     
     if pontos >= pspaceships:
         pontos -= pspaceships
         spaceships += 1
-        pspaceships = int(pspaceships + pspaceships * 0.25)  # Alterado de 0.3 para 0.25 (25%)
+        compras_periodo_spaceship += 1
+        pspaceships = int(pspaceships + pspaceships * 0.25)
         adicionar_spaceship_animacao()
         mensagem_temporaria = "Spaceship comprada!"
         mensagem_tempo = pygame.time.get_ticks()
@@ -255,43 +269,83 @@ def buy_spaceship():
         mensagem_temporaria = "Pontos insuficientes!"
         mensagem_tempo = pygame.time.get_ticks()
 
+def calcular_inflacao():
+    """Calcula e aplica a inflação/deflação baseada nas compras dos períodos"""
+    global pcursores, pspaceships, compras_periodo_cursor, compras_periodo_spaceship
+    global compras_anteriores_cursor, compras_anteriores_spaceship
+    global mensagens_inflacao, tempo_mensagens_inflacao
+    
+    # Calcular variação para cursores
+    if compras_anteriores_cursor > 0:
+        # Calcular diferença em relação ao período anterior
+        diferenca_cursor = compras_anteriores_cursor - compras_periodo_cursor 
+        variacao_cursor = diferenca_cursor * 2  # 2% por unidade de diferença
+        
+        # Aplicar variação (pode ser positiva ou negativa)
+        if variacao_cursor != 0:
+            novo_preco_cursor = pcursores * (1 + variacao_cursor / 100)
+            pcursores = max(1, int(novo_preco_cursor))
+            
+            if variacao_cursor > 0:
+                mensagens_inflacao["cursor"] = f"Cursor +{variacao_cursor}%"
+            else:
+                mensagens_inflacao["cursor"] = f"Cursor {variacao_cursor}%"
+            
+            tempo_mensagens_inflacao["cursor"] = pygame.time.get_ticks()
+            print(f"Variação Cursor: {variacao_cursor}%")
+    else:
+        # Primeiro período ou período sem compras anteriores: aplicar -10%
+        if compras_periodo_cursor == 0:
+            pcursores = max(1, int(pcursores * 0.9))
+            mensagens_inflacao["cursor"] = "Cursor -10% (estoque)"
+            tempo_mensagens_inflacao["cursor"] = pygame.time.get_ticks()
+            print("Cursor: -10% (excesso de estoque)")
+    
+    # Calcular variação para spaceships
+    if compras_anteriores_spaceship > 0:
+        # Calcular diferença em relação ao período anterior
+        diferenca_spaceship = compras_anteriores_spaceship - compras_periodo_spaceship
+        variacao_spaceship = diferenca_spaceship * 2  # 2% por unidade de diferença
+        
+        # Aplicar variação (pode ser positiva ou negativa)
+        if variacao_spaceship != 0:
+            novo_preco_spaceship = pspaceships * (1 + variacao_spaceship / 100)
+            pspaceships = max(1, int(novo_preco_spaceship))
+            
+            if variacao_spaceship > 0:
+                mensagens_inflacao["spaceship"] = f"Spaceship +{variacao_spaceship}%"
+            else:
+                mensagens_inflacao["spaceship"] = f"Spaceship {variacao_spaceship}%"
+            
+            tempo_mensagens_inflacao["spaceship"] = pygame.time.get_ticks()
+            print(f"Variação Spaceship: {variacao_spaceship}%")
+    else:
+        # Primeiro período ou período sem compras anteriores: aplicar -10%
+        if compras_periodo_spaceship == 0:
+            pspaceships = max(1, int(pspaceships * 0.9))
+            mensagens_inflacao["spaceship"] = "Spaceship -10% (estoque)"
+            tempo_mensagens_inflacao["spaceship"] = pygame.time.get_ticks()
+            print("Spaceship: -10% (excesso de estoque)")
+    
+    # Atualizar compras anteriores para o próximo período
+    compras_anteriores_cursor = compras_periodo_cursor
+    compras_anteriores_spaceship = compras_periodo_spaceship
+    
+    # Resetar contadores do período atual
+    compras_periodo_cursor = 0
+    compras_periodo_spaceship = 0
+
 def toggle_loja():
     """Abre ou fecha a loja"""
     global loja_aberta
     loja_aberta = not loja_aberta
 
-def aumentar_precos_aleatorio():
-    """Aumenta os preços de todos os itens entre 5% e 40%"""
-    global pcursores, pspaceships, mensagem_temporaria, mensagem_tempo, ultimo_aumento_precos, proximo_aumento_tempo
-    
-    # Gerar aumento aleatório entre 5% e 40%
-    aumento_percentual = random.uniform(1.05, 1.40)
-    
-    # Aplicar aumento aos preços
-    pcursores = int(pcursores * aumento_percentual)
-    pspaceships = int(pspaceships * aumento_percentual)
-    
-    # Atualizar tempos
-    ultimo_aumento_precos = pygame.time.get_ticks()
-    proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
-    
-    # Mensagem informativa
-    percentual = int((aumento_percentual - 1) * 100)
-    mensagem_temporaria = f"Inflação! Preços aumentaram {percentual}%!"
-    mensagem_tempo = pygame.time.get_ticks()
-    
-    print(f"Preços aumentados em {percentual}%")
-    print(f"Novo preço cursor: {pcursores}")
-    print(f"Novo preço spaceship: {pspaceships}")
-
 def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto, image=None, pressed=False):
     """Desenha um botão na tela"""
     mouse_pos = pygame.mouse.get_pos()
     
-    # Verificar se o mouse está sobre o botão
     hover = rect.collidepoint(mouse_pos)
     
-    # Determinar a cor do botão
     if pressed:
         cor = cor_hover
     elif hover and mouse_pressionado:
@@ -301,10 +355,8 @@ def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto
     else:
         cor = cor_normal
     
-    # Desenhar o botão
     if image:
         if pressed and image != click_icon and image != click_upgraded_icon:
-            # Escurecer a imagem para efeito de pressionado
             dark_image = image.copy()
             dark_image.fill((50, 50, 50, 0), special_flags=pygame.BLEND_RGBA_SUB)
             surface.blit(dark_image, rect)
@@ -314,7 +366,6 @@ def desenhar_botao(surface, rect, texto, fonte, cor_normal, cor_hover, cor_texto
         pygame.draw.rect(surface, cor, rect, border_radius=10)
         pygame.draw.rect(surface, CINZA_ESCURO, rect, 2, border_radius=10)
     
-    # Desenhar o texto se não for um botão com imagem
     if not image and texto:
         texto_surf = fonte.render(texto, True, cor_texto)
         texto_rect = texto_surf.get_rect(center=rect.center)
@@ -334,38 +385,62 @@ def desenhar_loja():
     titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 150))
     tela.blit(titulo_texto, titulo_rect)
     
-    # Timer de próximo aumento
+    # Timer de inflação
     tempo_atual = pygame.time.get_ticks()
-    tempo_restante = max(0, proximo_aumento_tempo - tempo_atual)
+    tempo_restante = max(0, proximo_periodo_inflacao - tempo_atual)
     minutos_restantes = tempo_restante // 60000
     segundos_restantes = (tempo_restante % 60000) // 1000
     
-    timer_texto = fonte_pequena.render(f"Próximo aumento: {minutos_restantes:02d}:{segundos_restantes:02d}", True, VERMELHO)
+    timer_texto = fonte_pequena.render(f"Próximo ajuste: {minutos_restantes:02d}:{segundos_restantes:02d}", True, ROXO)
     timer_rect = timer_texto.get_rect(center=(LARGURA // 2, 190))
     tela.blit(timer_texto, timer_rect)
     
+    # Compras no período
+    compras_texto = fonte_muito_pequena.render(f"Compras: Cursor({compras_periodo_cursor}/+{compras_periodo_cursor*2}%) Spaceship({compras_periodo_spaceship}/+{compras_periodo_spaceship*2}%)", True, PRETO)
+    compras_rect = compras_texto.get_rect(center=(LARGURA // 2, 210))
+    tela.blit(compras_texto, compras_rect)
+    
+    # Compras período anterior
+    if compras_anteriores_cursor > 0 or compras_anteriores_spaceship > 0:
+        anteriores_texto = fonte_muito_pequena.render(f"Período anterior: Cursor({compras_anteriores_cursor}) Spaceship({compras_anteriores_spaceship})", True, CINZA_ESCURO)
+        anteriores_rect = anteriores_texto.get_rect(center=(LARGURA // 2, 225))
+        tela.blit(anteriores_texto, anteriores_rect)
+    
     # Item Cursor
-    cursor_rect = pygame.Rect(LARGURA // 4 + 50, 220, LARGURA // 2 - 100, 60)
+    cursor_rect = pygame.Rect(LARGURA // 4 + 50, 240, LARGURA // 2 - 100, 60)
     pygame.draw.rect(tela, CINZA, cursor_rect, border_radius=10)
     
     texto_cursor = fonte_media.render("Cursor", True, PRETO)
-    tela.blit(texto_cursor, (cursor_rect.x + 20, cursor_rect.y + 20))
+    tela.blit(texto_cursor, (cursor_rect.x + 20, cursor_rect.y + 15))
     
     texto_preco = fonte_media.render(f"Preço: {pcursores}pts", True, PRETO)
-    tela.blit(texto_preco, (cursor_rect.x + 200, cursor_rect.y + 20))
+    tela.blit(texto_preco, (cursor_rect.x + 200, cursor_rect.y + 15))
+    
+    # Mensagem de inflação do cursor
+    tempo_atual = pygame.time.get_ticks()
+    if tempo_atual - tempo_mensagens_inflacao["cursor"] < 3000 and mensagens_inflacao["cursor"]:
+        cor_inflacao = VERMELHO if "+" in mensagens_inflacao["cursor"] else VERDE
+        inflacao_texto = fonte_muito_pequena.render(mensagens_inflacao["cursor"], True, cor_inflacao)
+        tela.blit(inflacao_texto, (cursor_rect.x + 20, cursor_rect.y + 40))
     
     botao_cursor_rect = pygame.Rect(cursor_rect.right - 220, cursor_rect.y + 15, 200, 30)
     hover_cursor = desenhar_botao(tela, botao_cursor_rect, "Comprar", fonte_pequena, VERDE, (0, 150, 0), BRANCO, buy_icon)
     
     # Item Spaceship
-    spaceship_rect = pygame.Rect(LARGURA // 4 + 50, 300, LARGURA // 2 - 100, 60)
+    spaceship_rect = pygame.Rect(LARGURA // 4 + 50, 320, LARGURA // 2 - 100, 60)
     pygame.draw.rect(tela, CINZA, spaceship_rect, border_radius=10)
     
     texto_spaceship = fonte_media.render("Spaceship", True, PRETO)
-    tela.blit(texto_spaceship, (spaceship_rect.x + 20, spaceship_rect.y + 20))
+    tela.blit(texto_spaceship, (spaceship_rect.x + 20, spaceship_rect.y + 15))
     
     texto_preco_sp = fonte_media.render(f"Preço: {pspaceships}pts", True, PRETO)
-    tela.blit(texto_preco_sp, (spaceship_rect.x + 200, spaceship_rect.y + 20))
+    tela.blit(texto_preco_sp, (spaceship_rect.x + 200, spaceship_rect.y + 15))
+    
+    # Mensagem de inflação da spaceship
+    if tempo_atual - tempo_mensagens_inflacao["spaceship"] < 3000 and mensagens_inflacao["spaceship"]:
+        cor_inflacao = VERMELHO if "+" in mensagens_inflacao["spaceship"] else VERDE
+        inflacao_texto = fonte_muito_pequena.render(mensagens_inflacao["spaceship"], True, cor_inflacao)
+        tela.blit(inflacao_texto, (spaceship_rect.x + 20, spaceship_rect.y + 40))
     
     botao_spaceship_rect = pygame.Rect(spaceship_rect.right - 220, spaceship_rect.y + 15, 200, 30)
     hover_spaceship = desenhar_botao(tela, botao_spaceship_rect, "Comprar", fonte_pequena, AZUL, (0, 100, 200), BRANCO, buy_spaceship_icon)
@@ -374,7 +449,6 @@ def desenhar_loja():
     fechar_rect = pygame.Rect(LARGURA // 2 - 100, ALTURA - 150, 200, 50)
     hover_fechar = desenhar_botao(tela, fechar_rect, "Fechar Loja", fonte_media, VERMELHO, (200, 0, 0), BRANCO)
     
-    # Retornar informações sobre quais botões estão com hover
     return {
         'cursor': hover_cursor,
         'spaceship': hover_spaceship,
@@ -385,15 +459,11 @@ def desenhar_loja():
 for _ in range(spaceships):
     adicionar_spaceship_animacao()
 
-# Inicializar timer de aumento de preços (adicionar estas linhas)
-if ultimo_aumento_precos == 0:
-    ultimo_aumento_precos = pygame.time.get_ticks()
-    proximo_aumento_tempo = ultimo_aumento_precos + intervalo_aumento
-
-# Loop principal
-executando = True
-ultimo_tempo_clique = 0
-tempo_inicial = pygame.time.get_ticks()
+# Inicializar sistema de inflação
+tempo_atual = pygame.time.get_ticks()
+if ultimo_periodo_inflacao == 0:
+    ultimo_periodo_inflacao = tempo_atual
+    proximo_periodo_inflacao = tempo_atual + intervalo_inflacao
 
 # Variáveis para controle de interface
 botoes_loja_hover = {'cursor': False, 'spaceship': False, 'fechar': False}
@@ -402,13 +472,25 @@ botao_carregar_hover = False
 botao_loja_hover = False
 botao_clique_hover = False
 
+# Loop principal
+executando = True
+ultimo_tempo_clique = 0
+tempo_inicial = pygame.time.get_ticks()
+
 while executando:
     tempo_atual = pygame.time.get_ticks()
-    tempo_decorrido = (tempo_atual - tempo_inicial) / 1000.0  # Converter para segundos
+    tempo_decorrido = (tempo_atual - tempo_inicial) / 1000.0
     
-    # VERIFICAÇÃO DO AUMENTO DE PREÇOS
-    if tempo_atual >= proximo_aumento_tempo:
-        aumentar_precos_aleatorio()
+    # Verificar período de inflação
+    if tempo_atual >= proximo_periodo_inflacao:
+        calcular_inflacao()
+        ultimo_periodo_inflacao = tempo_atual
+        proximo_periodo_inflacao = tempo_atual + intervalo_inflacao
+    
+    # Atualizar produção automática
+    if tempo_decorrido - ultimo_tempo_clique >= 2.5:
+        clicker()
+        ultimo_tempo_clique = tempo_decorrido
     
     # Processar eventos
     for evento in pygame.event.get():
@@ -419,30 +501,28 @@ while executando:
                 executando = False
             elif evento.key == pygame.K_SPACE:
                 clique()
-            elif evento.key == pygame.K_l:  # Tecla L para abrir/fechar loja
+            elif evento.key == pygame.K_l:
                 toggle_loja()
         elif evento.type == pygame.MOUSEBUTTONDOWN:
-            if evento.button == 1:  # Botão esquerdo do mouse
+            if evento.button == 1:
                 mouse_pressionado = True
                 clique_liberado = False
                 x, y = evento.pos
                 
-                # Verificar clique no botão de clique principal
+                # Botão de clique principal
                 botao_clique_rect = pygame.Rect(LARGURA // 2 - 150, ALTURA - 150, 300, 100)
                 if botao_clique_rect.collidepoint(x, y):
                     clique()
                 
-                # Verificar clique no título para easter egg
+                # Easter egg
                 titulo_texto = fonte_titulo.render("My Clicker", True, PRETO)
                 titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 80))
-                
-                # Verificar se clique foi próximo ao ponto do "i"
                 ponto_i_x = titulo_rect.right - 30
                 if abs(x - ponto_i_x) < 20 and abs(y - titulo_rect.centery) < 20:
                     if pontos == 69 and not botao_upgradado:
                         comprar_upgrade_secreto()
                 
-                # Verificar clique nos botões de controle
+                # Botões de controle
                 botao_salvar_rect = pygame.Rect(50, ALTURA - 100, 64, 64)
                 if botao_salvar_rect.collidepoint(x, y):
                     salvar_jogo()
@@ -455,7 +535,7 @@ while executando:
                 if botao_loja_rect.collidepoint(x, y):
                     toggle_loja()
                 
-                # Verificar cliques na loja se estiver aberta
+                # Botões da loja
                 if loja_aberta:
                     if botoes_loja_hover['cursor']:
                         buy_cursor()
@@ -465,14 +545,9 @@ while executando:
                         toggle_loja()
                         
         elif evento.type == pygame.MOUSEBUTTONUP:
-            if evento.button == 1:  # Botão esquerdo do mouse liberado
+            if evento.button == 1:
                 mouse_pressionado = False
                 clique_liberado = True
-    
-    # Atualizar lógica do jogo
-    if tempo_decorrido - ultimo_tempo_clique >= 2.5:  # 2.5 segundos
-        clicker()
-        ultimo_tempo_clique = tempo_decorrido
     
     # Atualizar animações
     for anim in spaceship_animations:
@@ -481,36 +556,36 @@ while executando:
             anim["y"] = ALTURA + 60
             anim["x"] = random.randint(60, LARGURA - 60)
     
-    # Verificar se o botão de clique deve voltar ao normal
+    # Resetar botão de clique
     if botao_clique_pressionado and tempo_atual - botao_clique_tempo > 500:
         botao_clique_pressionado = False
     
     # Renderizar
     tela.fill(BRANCO)
     
-    # Desenhar título
+    # Título
     titulo_texto = fonte_titulo.render("My Clicker", True, PRETO)
     titulo_rect = titulo_texto.get_rect(center=(LARGURA // 2, 80))
     tela.blit(titulo_texto, titulo_rect)
     
-    # Desenhar estatísticas
+    # Estatísticas
     texto_pontos = fonte_grande.render(f"Pontos: {pontos:.1f}", True, PRETO)
     tela.blit(texto_pontos, (50, 50))
     
     texto_cursores = fonte_grande.render(f"Cursores: {cursores}", True, PRETO)
     tela.blit(texto_cursores, (LARGURA - texto_cursores.get_width() - 50, 50))
     
-    # Desenhar cursores
+    # Cursores visuais
     for i in range(cursores):
         x = random.randint(40, LARGURA - 40)
         y = random.randint(150, ALTURA - 200)
         tela.blit(cursor_icon, (x, y))
     
-    # Desenhar spaceships animadas
+    # Spaceships animadas
     for anim in spaceship_animations:
         tela.blit(spaceship_icon, (anim["x"], anim["y"]))
     
-    # Desenhar botões de controle
+    # Botões de controle
     botao_salvar_rect = pygame.Rect(50, ALTURA - 100, 64, 64)
     botao_salvar_hover = desenhar_botao(tela, botao_salvar_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, save_icon)
     
@@ -520,7 +595,7 @@ while executando:
     botao_loja_rect = pygame.Rect(LARGURA - 130, ALTURA - 100, 64, 64)
     botao_loja_hover = desenhar_botao(tela, botao_loja_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, loja_icon)
     
-    # Desenhar botão de clique principal
+    # Botão de clique principal
     botao_clique_rect = pygame.Rect(LARGURA // 2 - 150, ALTURA - 150, 300, 100)
     
     if botao_upgradado:
@@ -534,11 +609,11 @@ while executando:
         else:
             botao_clique_hover = desenhar_botao(tela, botao_clique_rect, "", fonte_media, CINZA, CINZA_ESCURO, PRETO, click_icon)
     
-    # Desenhar loja se estiver aberta
+    # Loja
     if loja_aberta:
         botoes_loja_hover = desenhar_loja()
     
-    # Desenhar mensagem temporária
+    # Mensagem temporária
     if mensagem_temporaria and tempo_atual - mensagem_tempo < 2000:
         texto_msg = fonte_media.render(mensagem_temporaria, True, PRETO)
         msg_rect = texto_msg.get_rect(center=(LARGURA // 2, 120))
@@ -546,7 +621,6 @@ while executando:
     elif mensagem_temporaria:
         mensagem_temporaria = ""
     
-    # Atualizar a tela
     pygame.display.flip()
     relogio.tick(60)
 
