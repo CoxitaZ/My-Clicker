@@ -121,3 +121,6 @@ Abrir um Pull Request
 
   **Reportar Problemas**
 Encontrou um bug ou tem uma sugestão? Por favor, abra uma issue no GitHub.
+
+faça também com que desse período de 3 em 3min os protudos recebam também uma alteração adcional que varie de -25% até +50% do valor.
+faça também com que produtos que você ainda não comprou
